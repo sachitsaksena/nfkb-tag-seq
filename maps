@@ -1,0 +1,5 @@
+bowtie2 --local -x Mus_musculus.GRCm38.cdna.all.fa -U A_2.fastq.trim -S A_2.fastq.trim.sam --no-hd --no-sq --no-unal -k 5
+bowtie2 --local -x Mus_musculus.GRCm38.cdna.all.fa -U fq.fastq.trim -S fq.fastq.trim.sam --no-hd --no-sq --no-unal -k 5
+bowtie2 --local -x Mus_musculus.GRCm38.cdna.all.fa -U A_1.fastq.trim -S A_1.fastq.trim.sam --no-hd --no-sq --no-unal -k 5
+bowtie2 --local -x Mus_musculus.GRCm38.cdna.all.fa -U A_4.fastq.trim -S A_4.fastq.trim.sam --no-hd --no-sq --no-unal -k 5
+bowtie2 --local -x Mus_musculus.GRCm38.cdna.all.fa -U A_3.fastq.trim -S A_3.fastq.trim.sam --no-hd --no-sq --no-unal -k 5
