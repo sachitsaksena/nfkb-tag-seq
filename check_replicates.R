@@ -1,4 +1,4 @@
-#####
+.#####
 # EXECUTE
 #####
 library(dplyr)
@@ -8,8 +8,17 @@ library(gplots)
 library(genefilter)
 library(calibrate)
 library(DESeq2)
+library(data.table)
+library(wesanderson)
 # source original function list 
-source("./helper_functions.R")
+# source("./helper_functions.R")
+source("silhouette.R")
+source("rld_pca.R")
+# setwd("~/2018_projects/yankeelov/tag-based_RNAseq/")
+
+##########
+# DATA PRE-PROCESSING
+##########
 
 # load original data frame
 a_data <- read.csv("./A.csv", header=TRUE, row.names = 1)
@@ -46,10 +55,12 @@ condition1_sorted %>% remove_rownames %>% column_to_rownames(var="a_0gene") -> c
 # labeled_data <- rename_genes(data = data, id = "ensembl", change = "names")
 
 (condition <- factor(c(rep("ctl", 4), rep("exp", 80))))
+(samples <- factor(substr(colnames(condition1), 1, 1)))
 # Convert to matrix
-countdata1 <- as.matrix(condition1_averaged)
-countdata2 <- as.matrix(condition2_averaged)
-
+countdata1 <- as.matrix(condition1_final)
+countdata2 <- as.matrix(condition2_final)
+countdata1[is.na(countdata1)] <- 0
+countdata2[is.na(countdata2)] <- 0
 # make DESeq2 dataframe
 (coldata1 <- data.frame(row.names=colnames(countdata1), condition))
 (coldata2 <- data.frame(row.names=colnames(countdata2), condition))
@@ -59,69 +70,115 @@ dds1 <- DESeq(dds1)
 dds2 <- DESeq(dds2)
 
 # plot dispersions
-png("qc-dispersions_condition1.png", 1000, 1000, pointsize=20)
-plotDispEsts(dds1, main="Dispersion plot")
-dev.off()
-
-png("qc-dispersions_condition2.png", 1000, 1000, pointsize=20)
-plotDispEsts(dds2, main="Dispersion plot")
-dev.off()
+# pdf("qc-dispersions_condition1.pdf", pointsize=.5)
+# plotDispEsts(dds1, main="Dispersion plot")
+# dev.off()
+# 
+# pdf("qc-dispersions_condition2.pdf", pointsize=.5)
+# plotDispEsts(dds2, main="Dispersion plot") 
+# dev.off()
 
 # Regularized log transformation for clustering/heatmaps, etc
-rld1 <- rlogTransformation(dds1)
-rld2 <- rlogTransformation(dds2)
-head(assay(rld))
-hist(assay(rld))
+# rld1 <- rlogTransformation(dds1)
+# rld2 <- rlogTransformation(dds2)
+# saveRDS(rld1, "./rlogtransform1.rds")
+# saveRDS(rld2, "./rlogtransform2.rds")
 
-(mycols <- brewer.pal(8, "Dark2")[1:length(unique(condition))])
+rld1 <- readRDS("data/rlogtransform1.rds")
+rld2 <- readRDS("data/rlogtransform2.rds")
+
+hist(assay(rld1))
+hist(assay(rld2))
+
+
+# (mycols <- c("#FFD700", "#4682B4"))
+# reorder
+
+
+############
+# DISTANCE HEATMAP
+############
+
 
 # Sample distance heatmap
 sampleDists1 <- as.matrix(dist(t(assay(rld1))))
-png("qc-heatmap-samples1.png", w=1000, h=1000, pointsize=20)
+colnames(sampleDists1) <- substr(colnames(sampleDists1), 1, 1)
+rownames(sampleDists1) <- substr(rownames(sampleDists1), 1, 1)
+
+# color dendogram branches
+hcluster = hclust(dist(t(assay(rld1))), method ="ward.D")
+dend1 <- as.dendrogram(hcluster)
+library(dendextend)
+(mycols <- sample(heat.colors(21)[1:length(unique(colnames(sampleDists1)))]))
+dend1 <- color_branches(dend1, k = 21, col = mycols)
+col_labels <- get_leaves_branches_col(dend1)
+# But due to the way heatmap.2 works - we need to fix it to be in the 
+# order of the data!    
+col_labels <- col_labels[order(order.dendrogram(dend1))]
+
+pdf("qc-heatmap-samples1.pdf", pointsize=.5)
 heatmap.2(as.matrix(sampleDists1), key=F, trace="none",
-          col=colorpanel(100, "red", "green"),
-          ColSideColors=mycols[condition], RowSideColors=mycols[condition],
-          margin=c(10, 10), main="Sample Distance Matrix")
+          col=colorpanel(100, "#FFD700", "#4682B4"),
+          cluster_columns = FALSE,
+          # dendrogram="row",
+          Rowv = dend1,
+          # Colv = dend1,
+          ColSideColors=mycols[samples],
+          RowSideColors=col_labels,
+          margin=c(10, 10), main="Sample Distance Matrix Condition 1")
 dev.off()
 
 
-rld_pca <- function (rld, intgroup = "condition", ntop = 500, colors=NULL, legendpos="bottomleft", main="PCA Biplot", textcx=1, ...) {
-  require(genefilter)
-  require(calibrate)
-  require(RColorBrewer)
-  rv = rowVars(assay(rld))
-  select = order(rv, decreasing = TRUE)[seq_len(min(ntop, length(rv)))]
-  pca = prcomp(t(assay(rld)[select, ]))
-  fac = factor(apply(as.data.frame(colData(rld)[, intgroup, drop = FALSE]), 1, paste, collapse = " : "))
-  if (is.null(colors)) {
-    if (nlevels(fac) >= 3) {
-      colors = brewer.pal(nlevels(fac), "Paired")
-    }   else {
-      colors = c("black", "red")
-    }
-  }
-  pc1var <- round(summary(pca)$importance[2,1]*100, digits=1)
-  pc2var <- round(summary(pca)$importance[2,2]*100, digits=1)
-  pc1lab <- paste0("PC1 (",as.character(pc1var),"%)")
-  pc2lab <- paste0("PC1 (",as.character(pc2var),"%)")
-  plot(PC2~PC1, data=as.data.frame(pca$x), bg=colors[fac], pch=21, xlab=pc1lab, ylab=pc2lab, main=main, ...)
-  with(as.data.frame(pca$x), textxy(PC1, PC2, labs=rownames(as.data.frame(pca$x)), cex=textcx))
-  legend(legendpos, legend=levels(fac), col=colors, pch=20)
-  #     rldyplot(PC2 ~ PC1, groups = fac, data = as.data.frame(pca$rld),
-  #            pch = 16, cerld = 2, aspect = "iso", col = colours, main = draw.key(key = list(rect = list(col = colours),
-  #                                                                                         terldt = list(levels(fac)), rep = FALSE)))
-}
-png("qc-pca1.png", 1000, 1000, pointsize=20)
-rld_pca(rld1, colors=mycols, intgroup="condition", xlim=c(-75, 35))
+sampleDists2 <- as.matrix(dist(t(assay(rld2))))
+colnames(sampleDists2) <- substr(colnames(sampleDists2), 1, 1)
+rownames(sampleDists2) <- substr(rownames(sampleDists2), 1, 1)
+(mycols <- sample(rainbow(21)[1:length(unique(colnames(sampleDists2)))]))
+pdf("qc-heatmap-samples2.pdf", pointsize=.5)
+heatmap.2(as.matrix(sampleDists2), key=F, trace="none",
+          col=colorpanel(100, "#FFD700", "#4682B4"),
+          cluster_columns = FALSE,
+          ColSideColors=mycols[samples], RowSideColors=mycols[samples],
+          margin=c(10, 10), main="Sample Distance Matrix Condition 2")
 dev.off()
 
+# pdf("qc-pca1.pdf", pointsize=10)
+# rld_pca(rld1, intgroup="condition", xlim=c(-75, 35))
+# dev.off()
+######################################################################################
 
-# get differential expression results
-res <- results(dds2)
-table(res$padj<0.05)
-## Order by adjusted p-value
-res <- res[order(res$padj), ]
-## Merge with normalized count data
-resdata <- merge(as.data.frame(res), as.data.frame(counts(dds, normalized=TRUE)), by="row.names", sort=FALSE)
-names(resdata)[1] <- "Gene"
-head(resdata)
+##########
+# PCA of samples
+###########
+
+pdf("qc-pca_labs.pdf", pointsize=10)
+pca1 <- rld_pca(rld1, intgroup="condition", xlim=c(-20, 20))
+dev.off()
+
+pdf("qc-pca-scaled.pdf", pointsize=10)
+rld_pca(rld1, intgroup="condition", xlim=c(-15, 15))
+dev.off()
+
+pdf("qc-pca-scaled_nolabs.pdf", pointsize=10)
+rld_pca(rld1, intgroup="condition", xlim=c(-15, 15))
+dev.off()
+
+pdf("qc-pca-scaled_nolabs2.pdf", pointsize=10)
+pca2 <- rld_pca(rld2, intgroup="condition", xlim=c(-15, 15))
+dev.off()
+########
+# silhouette analysis
+########
+
+# silhouette for condition 1
+silhouette1 <- silhouette(pca1)
+
+# silhouette for condition 2
+rownames(pca2$x) <- substr(rownames(pca2$x), 4, 6)
+rownames(pca2$x)[1] <- "A_1"
+rownames(pca2$x)[2] <- "A_2"
+rownames(pca2$x)[3] <- "A_3"
+rownames(pca2$x)[4] <- "A_4"
+
+silhouette2 <- silhouette(pca2)
+
+
